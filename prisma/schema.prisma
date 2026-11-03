@@ -1,0 +1,266 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  HOMEOWNER
+  BUILDER
+  ARCHITECT
+  ADMIN
+}
+
+enum Facing {
+  NORTH
+  SOUTH
+  EAST
+  WEST
+  NORTH_EAST
+  NORTH_WEST
+  SOUTH_EAST
+  SOUTH_WEST
+}
+
+enum Purpose {
+  SELF_USE
+  RENTAL
+  MIXED
+}
+
+enum QualityTier {
+  BASIC
+  STANDARD
+  PREMIUM
+  LUXURY
+}
+
+enum AiMode {
+  LLM
+  DETERMINISTIC
+}
+
+enum LineSource {
+  LLM
+  DETERMINISTIC
+}
+
+enum MatchStatus {
+  SUGGESTED
+  SHORTLISTED
+  CONTACTED
+  QUOTED
+  SELECTED
+  DECLINED
+}
+
+enum AuditSeverity {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model User {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  name      String?
+  phone     String?
+  role      UserRole  @default(HOMEOWNER)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  projects     Project[]
+  quoteAudits  QuoteAudit[]
+  builder      BuilderProfile?
+
+  @@index([role])
+}
+
+model Project {
+  id             String      @id @default(cuid())
+  userId         String?
+  title          String?
+  plotWidthFt    Int
+  plotLengthFt   Int
+  facing         Facing      @default(EAST)
+  zoneSlug       String
+  locality       String?
+  pincode        String
+  roadWidthFt    Int
+  totalFloors    Int
+  hasBasement    Boolean     @default(false)
+  purpose        Purpose     @default(SELF_USE)
+  qualityTier    QualityTier @default(STANDARD)
+  vastuPreferred Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  user        User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  estimates   Estimate[]
+  floorPlans  FloorPlan[]
+  matches     BuilderMatch[]
+  quoteAudits QuoteAudit[]
+
+  @@index([userId])
+  @@index([zoneSlug])
+  @@index([createdAt])
+}
+
+model Estimate {
+  id                  String     @id @default(cuid())
+  projectId           String
+  engineVersion       String
+  aiMode              AiMode     @default(DETERMINISTIC)
+  aiModel             String?
+  confidence          Int        @default(75)
+  plotAreaSqft        Int
+  footprintSqft       Int
+  builtupSqft         Int
+  basementSqft        Int        @default(0)
+  farLimit            Decimal    @db.Decimal(4, 2)
+  farUsed             Decimal    @db.Decimal(4, 2)
+  baseRatePerSqft     Int
+  ratePerSqft         Int
+  effectiveRatePerSqft Int
+  constructionSubtotal Int
+  approvalsTotal      Int
+  contingency         Int
+  gst                 Int
+  totalCost           Int
+  narrative           String?
+  summary             String?
+  assumptions         Json
+  exclusions          Json
+  riskFlags           Json
+  createdAt           DateTime   @default(now())
+
+  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  lineItems LineItem[]
+
+  @@index([projectId])
+  @@index([createdAt])
+}
+
+model LineItem {
+  id          String     @id @default(cuid())
+  estimateId  String
+  stage       String
+  category    String
+  code        String
+  description String
+  quantity    Decimal    @db.Decimal(14, 3)
+  unit        String
+  rate        Decimal    @db.Decimal(14, 2)
+  amount      Int
+  source      LineSource @default(DETERMINISTIC)
+  sortOrder   Int        @default(0)
+
+  estimate Estimate @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+
+  @@index([estimateId])
+  @@index([stage])
+}
+
+model FloorPlan {
+  id          String   @id @default(cuid())
+  projectId   String
+  floorIndex  Int
+  vastuScore  Int      @default(70)
+  rooms       Json
+  notes       Json
+  createdAt   DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, floorIndex])
+  @@index([projectId])
+}
+
+model BuilderProfile {
+  id          String      @id @default(cuid())
+  userId      String?     @unique
+  slug        String      @unique
+  name        String
+  tagline     String
+  bio         String
+  zones       String[]
+  tiers       QualityTier[]
+  specialties String[]
+  minRate     Int
+  maxRate     Int
+  rating      Decimal     @db.Decimal(2, 1) @default(0)
+  reviews     Int         @default(0)
+  completed   Int         @default(0)
+  years       Int         @default(0)
+  verified    Boolean     @default(false)
+  insured     Boolean     @default(false)
+  leadTime    String?
+  accent      String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  user    User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  matches BuilderMatch[]
+
+  @@index([verified])
+  @@index([rating])
+}
+
+model BuilderMatch {
+  id        String      @id @default(cuid())
+  projectId String
+  builderId String
+  score     Int
+  reasons   String[]
+  status    MatchStatus @default(SUGGESTED)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  project Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  builder BuilderProfile @relation(fields: [builderId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, builderId])
+  @@index([builderId])
+  @@index([status])
+}
+
+model QuoteAudit {
+  id             String   @id @default(cuid())
+  userId         String?
+  projectId      String?
+  fileName       String
+  fileSizeBytes  Int
+  pageCount      Int?
+  riskScore      Int
+  summary        String
+  quotedTotal    BigInt?
+  benchmarkTotal BigInt?
+  deltaAmount    BigInt?
+  deltaPct       Decimal? @db.Decimal(6, 2)
+  findings       Json
+  detected       String[]
+  missing        String[]
+  stats          Json
+  createdAt      DateTime @default(now())
+
+  user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([projectId])
+  @@index([createdAt])
+}
+
+model KnowledgeChunk {
+  id        String   @id @default(cuid())
+  source    String
+  title     String
+  content   String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([source])
+}
